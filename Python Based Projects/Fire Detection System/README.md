@@ -15,11 +15,12 @@ Build a **drone-based fire detection and alert system** that flies over an area,
 ## How It Works
 
 1. Pluto drone flies (manually or on a predefined path)
-2. PlutoCam streams video to the laptop over WiFi
-3. Each frame is analyzed for fire-like regions using color detection or a trained model
-4. If fire is detected, the system triggers an alert (sound, log, or notification)
-5. Fire location is highlighted on the video feed with bounding boxes
-6. Optionally, the drone can hover over the fire zone for continuous monitoring
+2. PlutoCam streams video to the laptop over WiFi (IP: `192.168.0.1`, stream port: `7060`)
+3. Each frame is analyzed using **dual detection**:
+   - **HSV color detection** — detects fire-colored regions (red/orange/yellow) every frame (fast)
+   - **YOLOv8 model** — detects fire and smoke with bounding boxes and confidence scores (runs every N frames)
+4. If fire/smoke is detected, the system triggers a sound alert and highlights the region with bounding boxes
+5. A live HUD overlay shows detection status, hit count, and FPS
 
 ---
 
@@ -28,17 +29,121 @@ Build a **drone-based fire detection and alert system** that flies over an area,
 ```
 PlutoCam Feed                Processing Engine              Alert System
 ┌────────────────────┐      ┌────────────────────────┐     ┌──────────────────┐
-│ WiFi Video Stream  │─────>│ Fire Detection Model   │────>│ Sound Alert      │
-│ Frame Capture      │      │ (Color / CNN / YOLO)   │     │ Log to File      │
-│                    │      │ Bounding Box Overlay   │     │ Screenshot Save  │
+│ WiFi Video Stream  │─────>│ HSV Fire Detection     │────>│ Sound Alert      │
+│ (plutocam package) │      │ YOLOv8 Fire/Smoke Model│     │ On-Screen Warning│
+│                    │      │ Bounding Box Overlay   │     │                  │
 └────────────────────┘      └────────────────────────┘     └──────────────────┘
-                                      │
-                                      v
-                            ┌────────────────────────┐
-                            │ Drone Control (optional)│
-                            │ Hover / Return Home     │
-                            └────────────────────────┘
 ```
+
+---
+
+## Setup
+
+### 1. Create a virtual environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 2. Install dependencies
+
+```bash
+pip install plutocam plutocontrol ultralytics opencv-python numpy
+```
+
+### 3. Install ffmpeg (required for PlutoCam stream decoding)
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt install ffmpeg
+```
+
+### 4. Download YOLO fire detection weights
+
+Download a YOLOv8 fire/smoke model (`.pt` file) and place it in this folder. Example source:
+- [Abonia1/YOLOv8-Fire-and-Smoke-Detection](https://github.com/Abonia1/YOLOv8-Fire-and-Smoke-Detection) — trained weights at `runs/detect/train/weights/best.pt`
+
+---
+
+## How to Run
+
+### PlutoCam (default) — connect to drone WiFi first
+
+```bash
+python main.py --yolo-weights fire_best.pt
+```
+
+### Webcam (for testing without drone)
+
+```bash
+python main.py --yolo-weights fire_best.pt --source webcam
+```
+
+### Video file
+
+```bash
+python main.py --yolo-weights fire_best.pt --source path/to/video.mp4
+```
+
+### All options
+
+```bash
+python main.py --help
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--source` | `plutocam` | Video source: `plutocam`, `webcam`, or file path |
+| `--yolo-weights` | *(required)* | Path to YOLO `.pt` weights file |
+| `--yolo-conf` | `0.35` | YOLO confidence threshold |
+| `--yolo-size` | `320` | YOLO inference size (smaller = faster) |
+| `--skip-frames` | `2` | Run YOLO every N frames (1 = every frame) |
+| `--cam-ip` | `192.168.0.1` | PlutoCam IP address |
+| `--cpu` | `false` | Force CPU for YOLO inference |
+
+---
+
+## Controls (while running)
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `f` | Flip image 180° |
+| `y` | Toggle YOLO detection on/off |
+| `h` | Toggle HSV fire detection on/off |
+
+---
+
+## Detection Methods
+
+### HSV Color Detection
+- Converts each frame to HSV color space
+- Filters for fire colors (red, orange, yellow hues) using two HSV ranges
+- Applies morphological cleanup to reduce noise
+- Finds contours and filters by area and fill ratio
+- Runs every frame (very fast)
+- Shown with **orange** bounding boxes labeled `HSV-Fire`
+
+### YOLOv8 Model Detection
+- Uses a pre-trained YOLOv8 model for fire and smoke detection
+- Provides class labels (`Fire`, `smoke`) with confidence scores
+- Runs every N frames (configurable with `--skip-frames`)
+- Shown with **red** (fire) or **yellow** (smoke) bounding boxes
+
+Both methods run simultaneously for maximum detection reliability.
+
+---
+
+## Hardware Used
+
+* Pluto X / Pluto 1.2 Drone
+* PlutoCam (Pluto camera module)
+* Laptop (Python environment)
+* Fire source for testing (use candle or fire video for safety)
 
 ---
 
@@ -70,47 +175,6 @@ PlutoCam Feed                Processing Engine              Alert System
 
 ---
 
-## Requirements
-
-Suggested Python packages:
-
-```bash
-pip install plutocontrol opencv-python numpy
-# For CNN approach:
-pip install tensorflow keras
-# For YOLO approach:
-pip install ultralytics
-# For alerts:
-pip install playsound
-```
-
----
-
-## How to Run
-
-1. Connect your laptop to the Pluto drone WiFi
-2. Ensure PlutoCam is attached and streaming
-3. Run your script:
-
-```bash
-python main.py
-```
-
-4. Fly the drone over the area to survey (or use a test video)
-5. When fire is detected, the system will alert and highlight on screen
-6. Press **Q** to quit
-
----
-
-## Hardware Used
-
-* Pluto X / Pluto 1.2 Drone
-* PlutoCam (Pluto camera module)
-* Laptop (Python environment)
-* Fire source for testing (use candle or fire video for safety)
-
----
-
 ## Key Challenges to Solve
 
 * **Frame stabilization** — The drone's movement and motor vibration cause camera shake; apply software-based stabilization and run detection on stabilized frames for better accuracy
@@ -136,5 +200,4 @@ python main.py
 * Implement autonomous patrol routes for area surveillance
 * Send GPS coordinates of detected fire (with external GPS module)
 * Build a web dashboard for remote monitoring
-* Add smoke detection alongside fire detection
 * Multi-drone coordinated surveillance system
